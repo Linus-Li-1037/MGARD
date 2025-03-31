@@ -247,6 +247,9 @@ void reconstruct_pipeline_qoi(
     }
   }
 
+  refactored_metadata.metadata[0].corresponding_error = eb_Vx;
+  refactored_metadata.metadata[1].corresponding_error = eb_Vy;
+  refactored_metadata.metadata[2].corresponding_error = eb_Vz;
   // Copy final data out if we are done with reconstructing
   for (SIZE curr_subdomain_id = 0;
     curr_subdomain_id < domain_decomposer.num_subdomains();
