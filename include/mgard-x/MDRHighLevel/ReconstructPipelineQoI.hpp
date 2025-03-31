@@ -141,7 +141,7 @@ void reconstruct_pipeline_qoi(
       refactored_metadata.metadata[0], refactored_data.data[0], current_queue);
 
   SIZE total_size = 0;
-  uint32_t max_iter = 10;
+  uint32_t max_iter = 20;
   uint32_t iter = 0;
   int buffer_for_variable[3];
   double eb_Vx, eb_Vy, eb_Vz;
@@ -180,7 +180,7 @@ void reconstruct_pipeline_qoi(
         eb_Vx = refactored_metadata.metadata[0].corresponding_error;
         eb_Vy = refactored_metadata.metadata[1].corresponding_error;
         eb_Vz = refactored_metadata.metadata[2].corresponding_error;
-        std::cout << "eb_Vx: " << eb_Vx << ", eb_Vy: " << eb_Vy << ", eb_Vz: " << eb_Vz << std::endl;
+        // std::cout << "eb_Vx: " << eb_Vx << ", eb_Vy: " << eb_Vy << ", eb_Vz: " << eb_Vz << ", requested QoI error: " << tol << std::endl;
         for (SIZE id = 0; id < domain_decomposer.num_subdomains(); id++) {
           // refactored_metadata.metadata[id].requested_size = 50000000; //new tolerance
           reconstructor.GenerateRequest(refactored_metadata.metadata[id]);
@@ -208,12 +208,8 @@ void reconstruct_pipeline_qoi(
           refactored_metadata.metadata[curr_subdomain_id],
           mdr_data[current_buffer], config.mdr_adaptive_resolution,
           device_subdomain_buffer[current_buffer], current_queue);
-      buffer_for_variable[curr_subdomain_id] = current_buffer;
 
       if (curr_subdomain_id == config.mdr_qoi_num_variables - 1) {
-        std::cout << "buffer_for_variable: Vx=" << buffer_for_variable[0]
-          << ", Vy=" << buffer_for_variable[1]
-          << ", Vz=" << buffer_for_variable[2] << std::endl;
 
         DeviceRuntime<DeviceType>::SyncQueue(current_queue);
 
@@ -237,13 +233,13 @@ void reconstruct_pipeline_qoi(
         //  we set it true for testing only
 
         reconstructed_data.qoi_in_progress = mgard::MDR::V_TOT_error_estimation<T>(
-                (T *) device_subdomain_buffer[buffer_for_variable[0]].data(),
-                (T *) device_subdomain_buffer[buffer_for_variable[1]].data(),
-                (T *) device_subdomain_buffer[buffer_for_variable[2]].data(),
+                (T *) device_subdomain_buffer[0].data(),
+                (T *) device_subdomain_buffer[1].data(),
+                (T *) device_subdomain_buffer[2].data(),
                 refactored_metadata.metadata[0].num_elements,
                 eb_Vx, eb_Vy, eb_Vz, tol
               );
-        std::cout << "reconstructed_data.qoi_in_progress = " << reconstructed_data.qoi_in_progress << std::endl;   
+        // std::cout << "reconstructed_data.qoi_in_progress = " << reconstructed_data.qoi_in_progress << std::endl;   
       }
       
       current_buffer = next_buffer;
@@ -252,15 +248,13 @@ void reconstruct_pipeline_qoi(
   }
 
   // Copy final data out if we are done with reconstructing
-  if (!reconstructed_data.qoi_in_progress) {
-    for (SIZE curr_subdomain_id = 0;
-      curr_subdomain_id < domain_decomposer.num_subdomains();
-      curr_subdomain_id++) {
-      // Update reconstructed data
-      domain_decomposer.copy_subdomain(
-          device_subdomain_buffer[curr_subdomain_id], curr_subdomain_id,
-          subdomain_copy_direction::SubdomainToOriginal, current_queue);
-    }
+  for (SIZE curr_subdomain_id = 0;
+    curr_subdomain_id < domain_decomposer.num_subdomains();
+    curr_subdomain_id++) {
+    // Update reconstructed data
+    domain_decomposer.copy_subdomain(
+        device_subdomain_buffer[curr_subdomain_id], curr_subdomain_id,
+        subdomain_copy_direction::SubdomainToOriginal, current_queue);
   }
 
   DeviceRuntime<DeviceType>::SyncDevice();
