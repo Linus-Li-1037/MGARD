@@ -94,7 +94,6 @@ void reconstruct_pipeline_qoi(
     DomainDecomposer<D, T, ReconstructorType, DeviceType> &domain_decomposer,
     Config &config, RefactoredMetadata &refactored_metadata,
     RefactoredData &refactored_data, ReconstructedData &reconstructed_data) {
-  std::cout << "=========== reconstruct_pipeline_qoi ===========" << std::endl;
   Timer timer_series;
   if (log::level & log::TIME)
     timer_series.start();
@@ -185,10 +184,11 @@ void reconstruct_pipeline_qoi(
           // refactored_metadata.metadata[id].requested_size = 50000000; //new tolerance
           reconstructor.GenerateRequest(refactored_metadata.metadata[id]);
         }
-        for (auto &metadata : refactored_metadata.metadata) {
-          metadata.PrintStatus();
-        }
+        // for (auto &metadata : refactored_metadata.metadata) {
+        //   metadata.PrintStatus();
+        // }
         size_t size_read = read_mdr(refactored_metadata, refactored_data, "/home/linusli037/Polaris/MGARD/build-cuda-turing/mgard/miniNYX/XYZ", false, config);
+        refactored_metadata.total_size += size_read;
         // initiate the bitplane transfer for the 1st variable which
         // should coorespond to the next_buffer
         mdr_data[0].CopyFromRefactoredData(
@@ -261,11 +261,13 @@ void reconstruct_pipeline_qoi(
   }
 
   DeviceRuntime<DeviceType>::SyncDevice();
-  if (log::level & log::TIME) {
+  if (log::level || log::TIME) {
     timer_series.end();
     timer_series.print("Reconstruct pipeline", total_size);
     timer_series.clear();
   }
+  
+  std::cout << "Iterations = " << iter << std::endl;
 }
 
 } // namespace MDR
