@@ -15,12 +15,30 @@
 namespace mgard_x {
 namespace MDR {
 
+inline uint32_t read_file_tmp(){
+  std::string path = "/home/linusli037/Polaris/MGARD/build-cuda-turing/mgard/miniNYX/requested_size.txt";
+  FILE *pFile;
+  pFile = fopen(path.c_str(), "r");
+  if (pFile == NULL) {
+    std::cout << mgard_x::log::log_err << "file open error!\n";
+    exit(1);
+  }
+  uint32_t value;
+  if (fscanf(pFile, "%u", &value) != 1) {
+    std::cout << mgard_x::log::log_err << "file read error!\n";
+    fclose(pFile);
+    exit(1);
+  }
+  fclose(pFile);
+  return value;
+}
+
 template <DIM D, typename T, typename DeviceType, typename ReconstructorType>
 void reconstruct_pipeline_qoi(
     DomainDecomposer<D, T, ReconstructorType, DeviceType> &domain_decomposer,
     Config &config, RefactoredMetadata &refactored_metadata,
     RefactoredData &refactored_data, ReconstructedData &reconstructed_data) {
-  Timer timer_series;
+  Timer timer_series, qoi_timer;
   if (log::level & log::TIME)
     timer_series.start();
 
@@ -32,13 +50,13 @@ void reconstruct_pipeline_qoi(
       Cache::cache.device_subdomain_buffer;
   MDRData<DeviceType> *mdr_data = Cache::cache.mdr_data;
 
-  Array<D, bool, DeviceType> error_out({256, 256, 256});
-  Array<1, bool, DeviceType> error_final_out({1});
+  Array<D, double, DeviceType> error_out({config.domain_decomposition_sizes[0], config.domain_decomposition_sizes[1], config.domain_decomposition_sizes[2]});
+  Array<1, double, DeviceType> error_final_out({1});
   Array<1, Byte, DeviceType> workspace;
 
   for(int i=0; i<2; i++){
     error_final_out.resize({1}, i);
-    DeviceCollective<DeviceType>::AbsMax( 256 * 256 * 256,
+    DeviceCollective<DeviceType>::AbsMax( config.domain_decomposition_sizes[0] * config.domain_decomposition_sizes[1] * config.domain_decomposition_sizes[2],
         SubArray<1, T, DeviceType>(), SubArray<1, T, DeviceType>(),
         workspace, false, 0);
   }
@@ -118,8 +136,9 @@ void reconstruct_pipeline_qoi(
         eb_Vy = refactored_metadata.metadata[1].corresponding_error;
         eb_Vz = refactored_metadata.metadata[2].corresponding_error;
         // std::cout << "eb_Vx: " << eb_Vx << ", eb_Vy: " << eb_Vy << ", eb_Vz: " << eb_Vz << ", requested QoI error: " << tol << std::endl;
+        uint32_t usr_def_requested_size = read_file_tmp();
         for (SIZE id = 0; id < domain_decomposer.num_subdomains(); id++) {
-          // refactored_metadata.metadata[id].requested_size = 50000000; //new tolerance
+          refactored_metadata.metadata[id].requested_size = usr_def_requested_size; //new tolerance
           reconstructor.GenerateRequest(refactored_metadata.metadata[id]);
         }
         // for (auto &metadata : refactored_metadata.metadata) {
@@ -169,22 +188,36 @@ void reconstruct_pipeline_qoi(
         //     reconstructed_data.qoi_in_progress = false;
         //  }
         //  we set it true for testing only
+
+        if (log::level & log::TIME) qoi_timer.start();
         DeviceLauncher<DeviceType>::Execute(
           mgard_x::data_refactoring::multi_dimension::QoIKernel<D, T, DeviceType>(
                                             SubArray(device_subdomain_buffer[0]), 
                                             SubArray(device_subdomain_buffer[1]), 
                                             SubArray(device_subdomain_buffer[2]), 
-                                            error_out, eb_Vx, eb_Vy, eb_Vz, tol), 
+                                            SubArray(error_out), eb_Vx, eb_Vy, eb_Vz, tol), 
                                           current_queue);
-        SubArray<1, bool, DeviceType> out_1d({256*256*256}, error_out.data());
-        DeviceCollective<DeviceType>::AbsMax(256*256*256, out_1d, SubArray(error_final_out),
+        SubArray<1, double, DeviceType> out_1d({config.domain_decomposition_sizes[0]*config.domain_decomposition_sizes[1]*config.domain_decomposition_sizes[2]}, error_out.data());
+        std::vector<double> out_vec(refactored_metadata.metadata[0].num_elements);
+        std::cout << "num_elements = " << refactored_metadata.metadata[0].num_elements << std::endl;
+        std::cout << "out_vec.data() = " << out_vec.data() << std::endl;
+        MemoryManager<DeviceType>::Copy1D(out_vec.data(), out_1d.data(), refactored_metadata.metadata[0].num_elements,
+                                          current_queue);
+        std::cout << "max est error = " << *std::max_element(out_vec.begin(), out_vec.end()) << std::endl;
+        DeviceCollective<DeviceType>::AbsMax(config.domain_decomposition_sizes[0]*config.domain_decomposition_sizes[1]*config.domain_decomposition_sizes[2], out_1d, SubArray(error_final_out),
                                  workspace, true, current_queue);
-
-        bool error_final_out_host;
+        if (log::level || log::TIME) {
+          qoi_timer.end();
+          qoi_timer.print("QoI error estimation: ", total_size / 3);
+          qoi_timer.clear();
+        }
+        double error_final_out_host;
         MemoryManager<DeviceType>::Copy1D(&error_final_out_host, error_final_out.data(), 1,
                                           current_queue);
         DeviceRuntime<DeviceType>::SyncQueue(current_queue);
-        reconstructed_data.qoi_in_progress = error_final_out_host ? true : false;
+        // reconstructed_data.qoi_in_progress = error_final_out_host ? true : false;
+        std::cout << "==== maximal est error = " << error_final_out_host << " ====" << std::endl;
+        reconstructed_data.qoi_in_progress = (error_final_out_host > tol) ? true : false;
         if(reconstructed_data.qoi_in_progress){
             refactored_metadata.total_size += refactored_metadata.metadata[0].retrieved_size
                                     + refactored_metadata.metadata[1].retrieved_size
