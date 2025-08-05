@@ -235,7 +235,7 @@ void reconstruct_pipeline_qoi(
           domain_decomposer.subdomain_shape(curr_subdomain_id));
       log::info("Adapt Refactor to hierarchy");
       reconstructor.Adapt(hierarchy, config, current_queue);
-      total_size += hierarchy.total_num_elems() * sizeof(T);
+      if(iter == 1) total_size += hierarchy.total_num_elems() * sizeof(T);
       reconstructor.LoadMetadata(refactored_metadata.metadata[curr_subdomain_id], mdr_data[current_buffer], current_queue);
       reconstructor.Decompress(refactored_metadata.metadata[curr_subdomain_id], mdr_data[current_buffer], current_queue);
       if (curr_subdomain_id + 1 < domain_decomposer.num_subdomains()) {
